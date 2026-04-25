@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import BaseModel
 
@@ -59,6 +59,12 @@ class ActModel(BaseModel):
     accident_reason_id: Mapped[int] = mapped_column(ForeignKey("accident_reasons.id"), nullable=False)
     date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    department: Mapped["DepartmentModel"] = relationship()
+    accident_type: Mapped["AccidentTypeModel"] = relationship()
+    accident_reason: Mapped["AccidentReasonModel"] = relationship()
+    
+    participants: Mapped[list["AccidentParticipantModel"]] = relationship(back_populates="act", lazy="selectin")
+
 class AccidentParticipantModel(BaseModel):
     __tablename__ = "accident_participants"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
@@ -66,10 +72,24 @@ class AccidentParticipantModel(BaseModel):
     driver_id: Mapped[int] = mapped_column(ForeignKey("drivers.id", ondelete="CASCADE"), nullable=False)
     car_id: Mapped[int] = mapped_column(ForeignKey("cars.id", ondelete="CASCADE"), nullable=False)
 
+    act: Mapped["ActModel"] = relationship(back_populates="participants")
+    driver: Mapped["DriverModel"] = relationship()
+    car: Mapped["CarModel"] = relationship()
+
 
 class UserModel(BaseModel):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False) 
+    fio: Mapped[str] = mapped_column(String(255), nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), default="inspector")
+
+class InspectorKeyModel(BaseModel):
+    __tablename__ = "inspector_keys"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    key_value: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False) # Тот самый токен
+    fio: Mapped[str] = mapped_column(String(255), nullable=False) # ФИО работника
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False) # Использован ли ключ?

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 
 class DepartmentBase(BaseModel):
     name: str
@@ -117,9 +117,29 @@ class AccidentReasonResponse(AccidentReasonBase):
     class Config:
         from_attributes = True
 
+class ParticipantDetailResponse(BaseModel):
+    id: int
+    driver: DriverResponse
+    car: CarResponse
+    class Config:
+        from_attributes = True
+
+class ActDetailResponse(BaseModel):
+    id: int
+    place: str
+    victims: int
+    date: datetime
+    department: DepartmentResponse
+    accident_type: DictionaryResponse
+    accident_reason: DictionaryResponse
+    participants: List[ParticipantDetailResponse]
+    
+    class Config:
+        from_attributes = True
+
 
 class UserCreate(BaseModel):
-    username: str
+    inspector_key: str
     password: str
 
 class Token(BaseModel):
@@ -128,3 +148,13 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+
+class KeyCreate(BaseModel):
+    fio: str
+
+class KeyResponse(KeyCreate):
+    id: int
+    key_value: str
+    is_used: bool
+    class Config:
+        from_attributes = True
