@@ -142,6 +142,15 @@ class UserCreate(BaseModel):
     inspector_key: str
     password: str
 
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    fio: str
+    role: str
+
+    class Config:
+        from_attributes = True
+
 class Token(BaseModel):
     access_token: str
     token_type: str

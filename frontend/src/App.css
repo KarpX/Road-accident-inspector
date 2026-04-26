@@ -32,6 +32,7 @@
 #root {
   width: 100%;
   margin: 0;
+  overflow-x: hidden;
 }
 
 body {
@@ -242,10 +243,11 @@ body {
   padding: 20px 24px;
 }
 .stat-label {
-  font-size: 13px;
+  font-size: 16px;
   color: var(--gray-400);
   font-weight: 500;
   margin-bottom: 8px;
+  text-align: left;
 }
 .stat-row {
   display: flex;
@@ -259,21 +261,21 @@ body {
   font-family: "JetBrains Mono", monospace;
 }
 .stat-icon {
-  font-size: 28px;
+  font-size: 20px;
 }
 .stat-delta {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: 18px;
   font-weight: 600;
   margin-top: 10px;
 }
 .stat-delta.up {
-  color: #ef4444;
+  color: #f93c65;
 }
 .stat-delta.down {
-  color: #10b981;
+  color: #00b69b;
 }
 
 /* Main content layout */
@@ -315,6 +317,7 @@ body {
   outline: none;
   background: var(--gray-50);
   transition: border-color 0.15s;
+  color-scheme: light;
 }
 .filter-input:focus {
   border-color: var(--blue);
@@ -350,9 +353,36 @@ body {
 .filter-checkbox-row input[type="checkbox"] {
   width: 16px;
   height: 16px;
-  accent-color: var(--blue);
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1.5px solid var(--gray-300);
+  border-radius: 4px;
+  background-color: var(--gray-50);
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
 }
+
+.filter-checkbox-row input[type="checkbox"]:checked {
+  background-color: var(--blue);
+  border-color: var(--blue);
+}
+
+.filter-checkbox-row input[type="checkbox"]:checked::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  margin-bottom: 2px;
+}
+
 .filter-checkbox-row label {
   font-size: 14px;
   color: var(--gray-700);
@@ -438,6 +468,7 @@ body {
   font-weight: 700;
   color: var(--gray-900);
   min-width: 100px;
+  max-width: 150px;
   font-family: "JetBrains Mono", monospace;
 }
 .list-item-main {
@@ -449,6 +480,7 @@ body {
 .list-item-sub {
   font-size: 14px;
   color: var(--gray-400);
+  max-width: 280px;
 }
 .list-item-actions {
   display: flex;
@@ -591,6 +623,7 @@ body {
   background-color: var(--gray-100);
   outline: none;
   transition: border-color 0.15s;
+  color-scheme: light;
 }
 .form-input:focus {
   border-color: var(--blue);

@@ -63,7 +63,7 @@ class ActModel(BaseModel):
     accident_type: Mapped["AccidentTypeModel"] = relationship()
     accident_reason: Mapped["AccidentReasonModel"] = relationship()
     
-    participants: Mapped[list["AccidentParticipantModel"]] = relationship(back_populates="act", lazy="selectin")
+    participants: Mapped[list["AccidentParticipantModel"]] = relationship(back_populates="act", lazy="selectin", cascade="all, delete-orphan" )
 
 class AccidentParticipantModel(BaseModel):
     __tablename__ = "accident_participants"

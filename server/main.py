@@ -13,7 +13,7 @@ from auth import (
 )
 
 from fastapi import Depends, FastAPI, HTTPException
-from sqlalchemy import select, func, cast, Date
+from sqlalchemy import delete, select, func, cast, Date
 from sqlalchemy.orm import joinedload
 import datetime
 from fastapi.middleware.cors import CORSMiddleware
@@ -91,6 +91,10 @@ async def register_user(user: schemas.UserCreate):
         
         access_token = create_access_token(data={"sub": new_user.username})
         return {"access_token": access_token, "token_type": "bearer"}
+    
+@app.get("/api/auth/me", response_model=schemas.UserResponse, tags=["Auth"])
+async def get_current_user_info(current_user: models.UserModel = Depends(get_current_user)):
+    return current_user
 
 
 @app.post("/api/auth/login", response_model=schemas.Token, tags=["Auth"])
@@ -111,6 +115,21 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             data={"sub": user.username}, expires_delta=access_token_expires
         )
         return {"access_token": access_token, "token_type": "bearer"}
+    
+@app.delete("/api/auth/keys/{key_id}", tags=["Auth"])
+async def delete_inspector_key(key_id: int, current_user: models.UserModel = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Только администратор может удалять ключи")
+        
+    async with database.get_session() as session:
+        result = await session.execute(select(models.InspectorKeyModel).where(models.InspectorKeyModel.id == key_id))
+        key = result.scalar_one_or_none()
+        if not key:
+            raise HTTPException(status_code=404, detail="Ключ не найден")
+        
+        await session.delete(key)
+        await session.commit()
+        return {"message": "Ключ успешно удален"}
 
 
 @app.post("/api/drivers/", response_model=schemas.DriverResponse, tags=["Drivers"])
@@ -162,6 +181,27 @@ async def delete_driver(driver_id: int, current_user: models.UserModel = Depends
         await session.delete(driver)
         await session.commit()
         return driver
+    
+@app.put("/api/drivers/{driver_id}", response_model=schemas.DriverResponse, tags=["Drivers"])
+async def update_driver(
+    driver_id: int, 
+    driver_update: schemas.DriverCreate, 
+    current_user: models.UserModel = Depends(get_current_user)
+):
+    async with database.get_session() as session:
+        result = await session.execute(select(models.DriverModel).where(models.DriverModel.id == driver_id))
+        db_driver = result.scalar_one_or_none()
+        
+        if db_driver is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Водитель не найден")
+        
+        update_data = driver_update.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(db_driver, key, value)
+            
+        await session.commit()
+        await session.refresh(db_driver)
+        return db_driver
 
 @app.post("/api/cars/", response_model=schemas.CarResponse, tags=["Cars"])
 async def create_car(car: schemas.CarCreate, current_user: models.UserModel = Depends(get_current_user)):
@@ -213,9 +253,30 @@ async def delete_car(car_id: int, current_user: models.UserModel = Depends(get_c
         await session.delete(car)
         await session.commit()
         return car
+    
+@app.put("/api/cars/{car_id}", response_model=schemas.CarResponse, tags=["Cars"])
+async def update_car(
+    car_id: int, 
+    car_update: schemas.CarCreate, 
+    current_user: models.UserModel = Depends(get_current_user)
+):
+    async with database.get_session() as session:
+        result = await session.execute(select(models.CarModel).where(models.CarModel.id == car_id))
+        db_car = result.scalar_one_or_none()
+        
+        if db_car is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Машина не найдена")
+        
+        update_data = car_update.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(db_car, key, value)
+            
+        await session.commit()
+        await session.refresh(db_car)
+        return db_car
         
         
-@app.post("/api/department/", response_model=schemas.DepartmentResponse, tags=["Department"])
+@app.post("/api/departments/", response_model=schemas.DepartmentResponse, tags=["Departments"])
 async def create_department(department: schemas.DepartmentCreate, current_user: models.UserModel = Depends(get_current_user)):
     async with database.get_session() as session:
         new_department = models.DepartmentModel(**department.model_dump())
@@ -224,7 +285,7 @@ async def create_department(department: schemas.DepartmentCreate, current_user: 
         await session.refresh(new_department)
         return new_department
 
-@app.get("/api/department/", response_model=List[schemas.DepartmentResponse], tags=["Department"])
+@app.get("/api/departments/", response_model=List[schemas.DepartmentResponse], tags=["Departments"])
 async def get_departments(limit: int | None = None, current_user: models.UserModel = Depends(get_current_user)):
     async with database.get_session() as session:
         query = select(models.DepartmentModel)
@@ -235,7 +296,7 @@ async def get_departments(limit: int | None = None, current_user: models.UserMod
         result = await session.execute(query)
         return result.scalars().all()
     
-@app.get("/api/department/{department_id}", response_model=schemas.DepartmentResponse, tags=["Department"])
+@app.get("/api/departments/{department_id}", response_model=schemas.DepartmentResponse, tags=["Departments"])
 async def get_department(department_id: int, current_user: models.UserModel = Depends(get_current_user)):
     async with database.get_session() as session:
         result = await session.execute(
@@ -249,7 +310,7 @@ async def get_department(department_id: int, current_user: models.UserModel = De
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Отдел ГИБДД не найден")
         return department
     
-@app.delete("/api/department/{department_id}", response_model=schemas.DepartmentResponse, tags=["Department"])
+@app.delete("/api/departments/{department_id}", response_model=schemas.DepartmentResponse, tags=["Departments"])
 async def delete_department(department_id: int, current_user: models.UserModel = Depends(get_current_user)):
     async with database.get_session() as session:
         result = await session.execute(
@@ -265,6 +326,27 @@ async def delete_department(department_id: int, current_user: models.UserModel =
         await session.delete(department)
         await session.commit()
         return department
+    
+@app.put("/api/departments/{department_id}", response_model=schemas.DepartmentResponse, tags=["Department"])
+async def update_department(
+    department_id: int, 
+    dept_update: schemas.DepartmentCreate, 
+    current_user: models.UserModel = Depends(get_current_user)
+):
+    async with database.get_session() as session:
+        result = await session.execute(select(models.DepartmentModel).where(models.DepartmentModel.id == department_id))
+        db_dept = result.scalar_one_or_none()
+        
+        if db_dept is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Отдел ГИБДД не найден")
+        
+        update_data = dept_update.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(db_dept, key, value)
+            
+        await session.commit()
+        await session.refresh(db_dept)
+        return db_dept
     
 @app.post("/api/acts/", response_model=schemas.ActResponse, tags=["Acts"])
 async def create_act(act: schemas.ActCreate, current_user: models.UserModel = Depends(get_current_user)):
@@ -327,6 +409,40 @@ async def delete_act(act_id: int, current_user: models.UserModel = Depends(get_c
         await session.commit()
         return act
     
+@app.put("/api/acts/{act_id}", response_model=schemas.ActDetailResponse, tags=["Acts"])
+async def update_act(
+    act_id: int, 
+    act_update: schemas.ActCreate, 
+    current_user: models.UserModel = Depends(get_current_user)
+):
+    async with database.get_session() as session:
+        result = await session.execute(select(models.ActModel).where(models.ActModel.id == act_id))
+        db_act = result.scalar_one_or_none()
+        
+        if db_act is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Акт не найден")
+            
+        update_data = act_update.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(db_act, key, value)
+            
+        await session.commit()
+        
+        fresh_result = await session.execute(
+            select(models.ActModel)
+            .where(models.ActModel.id == act_id)
+            .options(
+                joinedload(models.ActModel.department),
+                joinedload(models.ActModel.accident_type),
+                joinedload(models.ActModel.accident_reason),
+                joinedload(models.ActModel.participants).joinedload(models.AccidentParticipantModel.driver),
+                joinedload(models.ActModel.participants).joinedload(models.AccidentParticipantModel.car)
+            )
+        )
+        fresh_act = fresh_result.unique().scalar_one()
+        
+        return fresh_act
+    
 
 @app.post("/api/participants/", response_model=schemas.ParticipantResponse, tags=["Participants"])
 async def add_participant(participant: schemas.ParticipantCreate, current_user: models.UserModel = Depends(get_current_user)):
@@ -360,6 +476,19 @@ async def get_participant(id: int, current_user: models.UserModel = Depends(get_
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Участник ДТП не найден")
         
         return participant
+    
+@app.delete("/api/participants/by-act/{act_id}", tags=["Participants"])
+async def delete_participants_by_act(
+    act_id: int, 
+    current_user: models.UserModel = Depends(get_current_user)
+):
+    async with database.get_session() as session:
+        await session.execute(
+            delete(models.AccidentParticipantModel)
+            .where(models.AccidentParticipantModel.act_id == act_id)
+        )
+        await session.commit()
+        return {"message": "Участники успешно удалены"}
     
 
 @app.get("/api/analytics/repeat-offenders", response_model=List[schemas.DriverResponse], tags=["Analytics"])

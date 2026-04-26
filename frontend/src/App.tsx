@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import "./App.css";
 import {
   LineChart,
@@ -11,13 +11,22 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from "recharts";
 
 import logo from "./assets/Logo.svg";
+import crash from "./assets/Crash.svg";
+import injured from "./assets/Injured.svg";
+import steeringWheel from "./assets/SteeringWheel.svg";
+import warning from "./assets/Warning.svg";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = "http://localhost:8000";
+
+// Глобальный колбэк для выброса из аккаунта при 401
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(cb: () => void) {
+  onUnauthorized = cb;
+}
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem("token");
@@ -29,6 +38,15 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
       ...options?.headers,
     },
   });
+
+  // Токен истёк — выбросить пользователя
+  if (res.status === 401) {
+    localStorage.removeItem("token");
+    localStorage.removeItem("userInfo");
+    onUnauthorized?.();
+    throw new Error("Сессия истекла. Пожалуйста, войдите снова.");
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Ошибка ${res.status}`);
@@ -89,11 +107,41 @@ interface ReasonStat {
   reason: string;
   count: number;
 }
+interface UserInfo {
+  username: string;
+  fio: string;
+  role: string;
+}
+
+// ─── User Info helpers ────────────────────────────────────────────────────────
+function formatFio(fio: string): string {
+  // "Денисов Дмитрий Дмитриевич" → "Денисов Д. Д."
+  const parts = fio.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  const [lastName, ...rest] = parts;
+  const initials = rest.map((p) => (p[0]?.toUpperCase() ?? "") + ".").join(" ");
+  return `${lastName} ${initials}`;
+}
+
+function getUserInfo(): UserInfo | null {
+  try {
+    return JSON.parse(localStorage.getItem("userInfo") || "");
+  } catch {
+    return null;
+  }
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
-const IconHeader = () => {
-  return <img src={logo} alt="Логотип ДТП Инспектор"></img>;
-};
+const IconHeader = () => <img src={logo} alt="Логотип ДТП Инспектор" />;
+
+const IconCrash = () => <img src={crash} />;
+
+const IconInjured = () => <img src={injured} />;
+
+const IconSteeringWheel = () => <img src={steeringWheel} />;
+
+const IconWarning = () => <img src={warning} />;
+
 const IconHome = () => (
   <svg
     width="20"
@@ -158,6 +206,21 @@ const IconCar = () => (
     <circle cx="18.5" cy="18.5" r="2.5" />
   </svg>
 );
+const IconBuilding = () => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M3 9h18M9 21V9m6 12V9" />
+  </svg>
+);
 const IconSettings = () => (
   <svg
     width="20"
@@ -170,8 +233,7 @@ const IconSettings = () => (
     strokeLinejoin="round"
   >
     <circle cx="12" cy="12" r="3" />
-    <path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14" />
-    <path d="M12 2v2M12 20v2M2 12h2M20 12h2" />
+    <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
   </svg>
 );
 const IconLogout = () => (
@@ -222,21 +284,21 @@ const IconTrash = () => (
     <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
   </svg>
 );
-const IconSearch = () => (
-  <svg
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <circle cx="11" cy="11" r="8" />
-    <line x1="21" y1="21" x2="16.65" y2="16.65" />
-  </svg>
-);
+// const IconSearch = () => (
+//   <svg
+//     width="16"
+//     height="16"
+//     viewBox="0 0 24 24"
+//     fill="none"
+//     stroke="currentColor"
+//     strokeWidth="2"
+//     strokeLinecap="round"
+//     strokeLinejoin="round"
+//   >
+//     <circle cx="11" cy="11" r="8" />
+//     <line x1="21" y1="21" x2="16.65" y2="16.65" />
+//   </svg>
+// );
 const IconPlus = () => (
   <svg
     width="16"
@@ -287,7 +349,7 @@ function Toast({
   );
 }
 
-// ─── Confirm modal ────────────────────────────────────────────────────────────
+// ─── Confirm ──────────────────────────────────────────────────────────────────
 function Confirm({
   msg,
   onConfirm,
@@ -336,6 +398,15 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  async function fetchAndStoreUserInfo() {
+    try {
+      const info = await apiFetch<UserInfo>("/api/auth/me");
+      localStorage.setItem("userInfo", JSON.stringify(info));
+    } catch {
+      /* fio недоступен — продолжаем без него */
+    }
+  }
+
   async function handleLogin() {
     setLoading(true);
     setError("");
@@ -349,6 +420,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
         body: formData.toString(),
       });
       localStorage.setItem("token", data.access_token);
+      await fetchAndStoreUserInfo();
       onLogin();
     } catch (e: any) {
       setError(e.message);
@@ -368,6 +440,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
         },
       );
       localStorage.setItem("token", data.access_token);
+      await fetchAndStoreUserInfo();
       onLogin();
     } catch (e: any) {
       setError(e.message);
@@ -382,7 +455,6 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
           <IconHeader />
           <p>Система учёта дорожных происшествий</p>
         </div>
-
         <div className="login-tabs">
           <button
             className={`login-tab ${tab === "login" ? "active" : ""}`}
@@ -403,7 +475,6 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
             Регистрация
           </button>
         </div>
-
         {tab === "login" ? (
           <>
             <div className="form-group">
@@ -475,7 +546,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
 }
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
-type Page = "dashboard" | "acts" | "drivers" | "cars";
+type Page = "dashboard" | "acts" | "drivers" | "cars" | "departments";
 
 function Sidebar({
   page,
@@ -491,8 +562,12 @@ function Sidebar({
     { id: "acts" as Page, label: "Акты", icon: <IconDoc /> },
     { id: "drivers" as Page, label: "Водители", icon: <IconUser /> },
     { id: "cars" as Page, label: "Автомобили", icon: <IconCar /> },
+    {
+      id: "departments" as Page,
+      label: "Отделы ГИБДД",
+      icon: <IconBuilding />,
+    },
   ];
-
   return (
     <div className="sidebar">
       <div className="sidebar-logo">
@@ -529,13 +604,12 @@ function Sidebar({
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function DashboardPage() {
-  const [repeatOffenders, setRepeatOffenders] = useState<
-    (Driver & { count?: number })[]
-  >([]);
+  const [repeatOffenders, setRepeatOffenders] = useState<Driver[]>([]);
   const [pedestrians, setPedestrians] = useState<Driver[]>([]);
   const [reasonStats, setReasonStats] = useState<ReasonStat[]>([]);
   const [acts, setActs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [chartPeriod, setChartPeriod] = useState<"year" | "month">("year");
 
   useEffect(() => {
     Promise.all([
@@ -554,34 +628,126 @@ function DashboardPage() {
       .catch(() => setLoading(false));
   }, []);
 
-  // Build monthly chart data
-  const monthlyData = (() => {
-    const months = [
-      "Янв",
-      "Фев",
-      "Мар",
-      "Апр",
-      "Май",
-      "Июн",
-      "Июл",
-      "Авг",
-      "Сен",
-      "Окт",
-      "Ноя",
-      "Дек",
-    ];
-    const counts = new Array(12).fill(0);
-    acts.forEach((a: any) => {
-      const m = new Date(a.date).getMonth();
-      counts[m]++;
-    });
-    return months.map((m, i) => ({ name: m, value: counts[i] }));
+  const chartData = (() => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    if (chartPeriod === "year") {
+      const months = [
+        "Янв",
+        "Фев",
+        "Мар",
+        "Апр",
+        "Май",
+        "Июн",
+        "Июл",
+        "Авг",
+        "Сен",
+        "Окт",
+        "Ноя",
+        "Дек",
+      ];
+      const counts = new Array(12).fill(0);
+      acts.forEach((a: any) => {
+        const d = new Date(a.date);
+        if (d.getFullYear() === currentYear) counts[d.getMonth()]++;
+      });
+      return months.map((m, i) => ({ name: m, value: counts[i] }));
+    } else {
+      // Считаем по дням текущего месяца
+      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+      const counts = new Array(daysInMonth).fill(0);
+      acts.forEach((a: any) => {
+        const d = new Date(a.date);
+        if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
+          counts[d.getDate() - 1]++;
+        }
+      });
+      return Array.from({ length: daysInMonth }, (_, i) => ({
+        name: `${i + 1}`,
+        value: counts[i],
+      }));
+    }
   })();
 
-  const totalVictims = acts.reduce(
+  // ── Динамика: текущий месяц vs прошлый ──────────────────────────────────────
+  const now = new Date();
+  const curM = now.getMonth(),
+    curY = now.getFullYear();
+  const prevM = curM === 0 ? 11 : curM - 1;
+  const prevY = curM === 0 ? curY - 1 : curY;
+
+  const inMonth = (d: string, m: number, y: number) => {
+    const dt = new Date(d);
+    return dt.getMonth() === m && dt.getFullYear() === y;
+  };
+  const curActs = acts.filter((a) => inMonth(a.date, curM, curY));
+  const prevActs = acts.filter((a) => inMonth(a.date, prevM, prevY));
+
+  function delta(
+    cur: number,
+    prev: number,
+  ): { text: string; up: boolean | null } {
+    if (prev === 0)
+      return cur > 0 ? { text: "+∞%", up: true } : { text: "—", up: null };
+    const p = ((cur - prev) / prev) * 100;
+    return { text: `${p >= 0 ? "+" : ""}${p.toFixed(1)}%`, up: p >= 0 };
+  }
+
+  const curVictims = curActs.reduce(
     (s: number, a: any) => s + (a.victims || 0),
     0,
   );
+  const prevVictims = prevActs.reduce(
+    (s: number, a: any) => s + (a.victims || 0),
+    0,
+  );
+  const curTS = curActs.reduce(
+    (s: number, a: any) => s + (a.participants?.length || 0),
+    0,
+  );
+  const prevTS = prevActs.reduce(
+    (s: number, a: any) => s + (a.participants?.length || 0),
+    0,
+  );
+
+  function repeatCount(actsArr: any[]) {
+    const map: Record<number, number> = {};
+    actsArr.forEach((a: any) =>
+      a.participants?.forEach((p: any) => {
+        if (p.driver?.id) map[p.driver.id] = (map[p.driver.id] || 0) + 1;
+      }),
+    );
+    return Object.values(map).filter((c) => c > 1).length;
+  }
+
+  const statCards = [
+    {
+      label: "Всего ДТП",
+      value: curActs.length,
+      icon: <IconCrash />,
+      d: delta(curActs.length, prevActs.length),
+    },
+    {
+      label: "Пострадавшие",
+      value: curVictims,
+      icon: <IconInjured />,
+      d: delta(curVictims, prevVictims),
+    },
+    {
+      label: "Участвовало ТС",
+      value: curTS,
+      icon: <IconSteeringWheel />,
+      d: delta(curTS, prevTS),
+    },
+    {
+      label: "Повторные ДТП",
+      value: repeatCount(curActs),
+      icon: <IconWarning />,
+      d: delta(repeatCount(curActs), repeatCount(prevActs)),
+    },
+  ];
 
   const PIE_COLORS = [
     "#2563EB",
@@ -604,47 +770,41 @@ function DashboardPage() {
       <h1 className="page-title">Статистика</h1>
 
       <div className="stats-grid">
-        {[
-          {
-            label: "Всего ДТП",
-            value: acts.length.toLocaleString("ru"),
-            icon: "💥",
-            delta: "+8.5%",
-            up: true,
-          },
-          {
-            label: "Пострадавшие",
-            value: totalVictims.toLocaleString("ru"),
-            icon: "🚶",
-            delta: "-1.5%",
-            up: false,
-          },
-          {
-            label: "Участвовало ТС",
-            value: Math.round(acts.length * 1.2).toLocaleString("ru"),
-            icon: "🚗",
-            delta: "+2.4%",
-            up: true,
-          },
-          {
-            label: "Повторные ДТП",
-            value: repeatOffenders.length.toLocaleString("ru"),
-            icon: "⚠️",
-            delta: "+1.2%",
-            up: true,
-          },
-        ].map((s) => (
-          <div className="card stat-card" key={s.label}>
-            <div className="stat-label">{s.label}</div>
-            <div className="stat-row">
-              <div className="stat-value">{s.value}</div>
-              <div className="stat-icon">{s.icon}</div>
+        {statCards.map((s) => {
+          const isUp = s.d.up === true;
+          const colorClass = s.d.up === null ? "" : isUp ? "up" : "down";
+          return (
+            <div className="card stat-card" key={s.label}>
+              <div className="stat-label">{s.label}</div>
+              <div className="stat-row">
+                <div className="stat-value">{s.value.toLocaleString("ru")}</div>
+                <div className="stat-icon">{s.icon}</div>
+              </div>
+              {s.d.up !== null ? (
+                <div className={`stat-delta ${colorClass}`}>
+                  {isUp ? "↑" : "↓"} {s.d.text}
+                  <span
+                    style={{
+                      fontWeight: 400,
+                      color: "var(--gray-400)",
+                      marginLeft: 4,
+                      fontSize: 14,
+                    }}
+                  >
+                    за прош. месяц
+                  </span>
+                </div>
+              ) : (
+                <div
+                  className="stat-delta"
+                  style={{ color: "var(--gray-300)" }}
+                >
+                  — нет данных
+                </div>
+              )}
             </div>
-            <div className={`stat-delta ${s.up ? "up" : "down"}`}>
-              {s.up ? "↑" : "↓"} {s.delta}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="card chart-card" style={{ marginBottom: 20 }}>
@@ -653,15 +813,16 @@ function DashboardPage() {
           <select
             className="filter-select"
             style={{ width: "auto", padding: "6px 32px 6px 12px" }}
+            value={chartPeriod}
+            onChange={(e) => setChartPeriod(e.target.value as "year" | "month")}
           >
-            <option>Год</option>
-            <option>Квартал</option>
-            <option>Месяц</option>
+            <option value="year">Текущий год</option>
+            <option value="month">Текущий месяц</option>
           </select>
         </div>
         <ResponsiveContainer width="100%" height={280}>
           <LineChart
-            data={monthlyData}
+            data={chartData}
             margin={{ top: 5, right: 20, left: -20, bottom: 0 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
@@ -677,6 +838,10 @@ function DashboardPage() {
               tickLine={false}
             />
             <Tooltip
+              formatter={(value) => [value, "ДТП"]}
+              labelFormatter={(label) =>
+                chartPeriod === "year" ? `Месяц: ${label}` : `Число: ${label}`
+              }
               contentStyle={{
                 borderRadius: 10,
                 border: "1px solid #E2E8F0",
@@ -690,7 +855,6 @@ function DashboardPage() {
               strokeWidth={2.5}
               dot={{ fill: "#2563EB", r: 4 }}
               activeDot={{ r: 6 }}
-              fill="rgba(37,99,235,0.08)"
             />
           </LineChart>
         </ResponsiveContainer>
@@ -714,7 +878,6 @@ function DashboardPage() {
             </ul>
           )}
         </div>
-
         <div className="card stat-card2">
           <div className="stat-card2-title">Наезд на пешехода</div>
           {pedestrians.length === 0 ? (
@@ -732,7 +895,6 @@ function DashboardPage() {
             </ul>
           )}
         </div>
-
         <div className="card stat-card2">
           <div className="stat-card2-title">Причины ДТП</div>
           {reasonStats.length === 0 ? (
@@ -756,7 +918,7 @@ function DashboardPage() {
                       <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v, n, p) => [v, p.payload.reason]} />
+                  <Tooltip formatter={(v, _n, p) => [v, p.payload.reason]} />
                 </PieChart>
               </ResponsiveContainer>
               <div
@@ -816,15 +978,11 @@ function ActsPage() {
     msg: string;
     type: "success" | "error";
   } | null>(null);
-
-  // Filters
   const [filterDateFrom, setFilterDateFrom] = useState("2026-01-01");
   const [filterDateTo, setFilterDateTo] = useState("2027-01-01");
   const [filterPlace, setFilterPlace] = useState("");
   const [filterType, setFilterType] = useState("");
   const [filterDept, setFilterDept] = useState("");
-
-  // Dicts
   const [types, setTypes] = useState<ActType[]>([]);
   const [reasons, setReasons] = useState<ActReason[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -838,7 +996,7 @@ function ActsPage() {
         apiFetch<Act[]>("/api/acts/"),
         apiFetch<ActType[]>("/api/additional/accident/types"),
         apiFetch<ActReason[]>("/api/additional/accident/reasons"),
-        apiFetch<Department[]>("/api/additional/departments/").catch(
+        apiFetch<Department[]>("/api/departments/").catch(
           () => [] as Department[],
         ),
         apiFetch<Driver[]>("/api/drivers/"),
@@ -982,7 +1140,6 @@ function ActsPage() {
             </div>
           </div>
         </div>
-
         <div className="list-panel">
           {loading ? (
             <div className="loader">
@@ -1033,7 +1190,6 @@ function ActsPage() {
           )}
         </div>
       </div>
-
       {showModal && (
         <ActModal
           act={editAct}
@@ -1130,30 +1286,28 @@ function ActModal({
         accident_reason_id: parseInt(reasonId),
         date: new Date(date).toISOString(),
       };
-      let actId: number;
+
       if (act) {
         await apiFetch(`/api/acts/${act.id}`, {
           method: "PUT",
           body: JSON.stringify(body),
         });
-        actId = act.id;
       } else {
         const created = await apiFetch<{ id: number }>("/api/acts/", {
           method: "POST",
           body: JSON.stringify(body),
         });
-        actId = created.id;
+
         for (const p of participants) {
-          if (p.driver_id && p.car_id) {
+          if (p.driver_id && p.car_id)
             await apiFetch("/api/participants/", {
               method: "POST",
               body: JSON.stringify({
-                act_id: actId,
+                act_id: created.id,
                 driver_id: parseInt(p.driver_id),
                 car_id: parseInt(p.car_id),
               }),
             });
-          }
         }
       }
       onSaved();
@@ -1178,7 +1332,6 @@ function ActModal({
             <IconClose />
           </button>
         </div>
-
         <div className="form-group">
           <label className="form-label">Место ДТП *</label>
           <input
@@ -1253,7 +1406,6 @@ function ActModal({
             </select>
           </div>
         </div>
-
         {!act && (
           <>
             <hr className="divider" />
@@ -1299,10 +1451,10 @@ function ActModal({
                 {participants.length > 1 && (
                   <button
                     className="btn btn-danger"
+                    style={{ padding: "6px" }}
                     onClick={() =>
                       setParticipants(participants.filter((_, j) => j !== i))
                     }
-                    style={{ padding: "6px" }}
                   >
                     <IconTrash />
                   </button>
@@ -1323,7 +1475,6 @@ function ActModal({
             </button>
           </>
         )}
-
         <div className="modal-actions">
           <button className="btn btn-outline" onClick={onClose}>
             Отмена
@@ -1482,7 +1633,6 @@ function DriversPage() {
             </div>
           </div>
         </div>
-
         <div className="list-panel">
           {loading ? (
             <div className="loader">
@@ -1503,9 +1653,12 @@ function DriversPage() {
                 >
                   {d.full_name}
                 </div>
-                <div className="list-item-sub">{d.driver_license}</div>
-                <div className="list-item-sub">
-                  Стаж вождения: {d.driver_exp}{" "}
+                <div className="list-item-main">{d.driver_license}</div>
+                <div
+                  className="list-item-sub"
+                  style={{ marginRight: 8, fontSize: 16 }}
+                >
+                  Стаж: {d.driver_exp}{" "}
                   {d.driver_exp === 1
                     ? "год"
                     : d.driver_exp < 5
@@ -1534,7 +1687,6 @@ function DriversPage() {
           )}
         </div>
       </div>
-
       {showModal && (
         <DriverModal
           driver={editDriver}
@@ -1552,7 +1704,7 @@ function DriversPage() {
       )}
       {confirmId !== null && (
         <Confirm
-          msg="Удалить водителя? Это действие необратимо."
+          msg="Удалить водителя?"
           onConfirm={() => handleDelete(confirmId!)}
           onCancel={() => setConfirmId(null)}
         />
@@ -1584,6 +1736,20 @@ function DriverModal({
   const [license, setLicense] = useState(driver?.driver_license || "");
   const [loading, setLoading] = useState(false);
 
+  const handleLicenseChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = e.target.value.replace(/\D/g, "");
+    val = val.substring(0, 10);
+
+    let formatted = val;
+    if (val.length > 4) {
+      formatted = `${val.slice(0, 2)} ${val.slice(2, 4)} ${val.slice(4)}`;
+    } else if (val.length > 2) {
+      formatted = `${val.slice(0, 2)} ${val.slice(2)}`;
+    }
+
+    setLicense(formatted);
+  };
+
   async function submit() {
     if (!fullName || !license) return onError("Заполните все поля");
     setLoading(true);
@@ -1593,17 +1759,16 @@ function DriverModal({
         driver_exp: parseInt(exp) || 0,
         driver_license: license,
       };
-      if (driver) {
+      if (driver)
         await apiFetch(`/api/drivers/${driver.id}`, {
           method: "PUT",
           body: JSON.stringify(body),
         });
-      } else {
+      else
         await apiFetch("/api/drivers/", {
           method: "POST",
           body: JSON.stringify(body),
         });
-      }
       onSaved();
     } catch (e: any) {
       onError(e.message);
@@ -1655,8 +1820,8 @@ function DriverModal({
             <input
               className="form-input"
               value={license}
-              onChange={(e) => setLicense(e.target.value)}
-              placeholder="77 АВ 123456"
+              onChange={handleLicenseChange}
+              placeholder="12 34 123456"
             />
           </div>
         </div>
@@ -1758,7 +1923,7 @@ function CarsPage() {
               <div className="filter-label">Поиск</div>
               <input
                 className="filter-input"
-                placeholder="Номер..."
+                placeholder="Номер или марка..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -1795,7 +1960,6 @@ function CarsPage() {
             </div>
           </div>
         </div>
-
         <div className="list-panel">
           {loading ? (
             <div className="loader">
@@ -1814,9 +1978,19 @@ function CarsPage() {
               return (
                 <div className="list-item" key={c.id}>
                   <div className="plate-badge">[ {c.number_plate} ]</div>
-                  <div className="list-item-main">{c.mark}</div>
-                  {firm && <div className="list-item-sub">{firm.name}</div>}
-                  {body && <div className="list-item-sub">{body.name}</div>}
+                  {firm && (
+                    <div className="list-item-main" style={{ fontSize: 20 }}>
+                      {firm.name}
+                    </div>
+                  )}
+                  <div className="list-item-main" style={{ fontSize: 20 }}>
+                    {c.mark}
+                  </div>
+                  {body && (
+                    <div className="list-item-main" style={{ fontSize: 20 }}>
+                      {body.name}
+                    </div>
+                  )}
                   <div className="list-item-actions">
                     <button
                       className="btn btn-icon"
@@ -1840,7 +2014,6 @@ function CarsPage() {
           )}
         </div>
       </div>
-
       {showModal && (
         <CarModal
           car={editCar}
@@ -1897,6 +2070,40 @@ function CarModal({
   const [bodyId, setBodyId] = useState(car?.body_type_id?.toString() || "");
   const [loading, setLoading] = useState(false);
 
+  const handlePlateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const allowedLetters = "АВЕКМНОРСТУХABEKMHOPCTYX";
+    let val = e.target.value.toUpperCase().replace(/[^А-ЯA-Z0-9]/g, "");
+
+    const mapEnToRu: Record<string, string> = {
+      A: "А",
+      B: "В",
+      E: "Е",
+      K: "К",
+      M: "М",
+      H: "Н",
+      O: "О",
+      P: "Р",
+      C: "С",
+      T: "Т",
+      Y: "У",
+      X: "Х",
+    };
+    val = val
+      .split("")
+      .map((char) => mapEnToRu[char] || char)
+      .join("");
+    val = val.replace(/[^АВЕКМНОРСТУХ0-9]/g, ""); // Строгая фильтрация
+
+    let formatted = "";
+    if (val.length > 0) formatted += val.substring(0, 1).replace(/[0-9]/g, ""); // 1 буква
+    if (val.length > 1) formatted += val.substring(1, 4).replace(/[^0-9]/g, ""); // 3 цифры
+    if (val.length > 4) formatted += val.substring(4, 6).replace(/[0-9]/g, ""); // 2 буквы
+    if (val.length > 6)
+      formatted += " " + val.substring(6, 9).replace(/[^0-9]/g, ""); // Регион
+
+    setPlate(formatted);
+  };
+
   async function submit() {
     if (!mark || !plate) return onError("Заполните марку и гос. номер");
     setLoading(true);
@@ -1907,17 +2114,16 @@ function CarModal({
         firm_id: firmId ? parseInt(firmId) : null,
         body_type_id: bodyId ? parseInt(bodyId) : null,
       };
-      if (car) {
+      if (car)
         await apiFetch(`/api/cars/${car.id}`, {
           method: "PUT",
           body: JSON.stringify(body),
         });
-      } else {
+      else
         await apiFetch("/api/cars/", {
           method: "POST",
           body: JSON.stringify(body),
         });
-      }
       onSaved();
     } catch (e: any) {
       onError(e.message);
@@ -1959,8 +2165,8 @@ function CarModal({
             <input
               className="form-input"
               value={plate}
-              onChange={(e) => setPlate(e.target.value)}
-              placeholder="А 123 АА 77"
+              onChange={handlePlateChange}
+              placeholder="А123АА 77"
               style={{ fontFamily: "monospace" }}
             />
           </div>
@@ -2014,71 +2220,460 @@ function CarModal({
   );
 }
 
+// ─── Departments Page ─────────────────────────────────────────────────────────
+function DepartmentsPage() {
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editDept, setEditDept] = useState<Department | null>(null);
+  const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [toast, setToast] = useState<{
+    msg: string;
+    type: "success" | "error";
+  } | null>(null);
+  const [search, setSearch] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setDepartments(await apiFetch<Department[]>("/api/departments/"));
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const filtered = departments.filter(
+    (d) => !search || d.name.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  async function handleDelete(id: number) {
+    try {
+      await apiFetch(`/api/departments/${id}`, { method: "DELETE" });
+      setToast({ msg: "Отдел удалён", type: "success" });
+      load();
+    } catch (e: any) {
+      setToast({ msg: e.message, type: "error" });
+    }
+    setConfirmId(null);
+  }
+
+  return (
+    <div className="page">
+      <h1 className="page-title">Отделы ГИБДД</h1>
+      <div className="content-layout">
+        <div className="filters-panel">
+          <div className="card filter-card">
+            <div className="section-add-btn">
+              <button
+                className="btn btn-primary"
+                style={{ width: "100%", justifyContent: "center" }}
+                onClick={() => {
+                  setEditDept(null);
+                  setShowModal(true);
+                }}
+              >
+                <IconPlus /> Добавить отдел
+              </button>
+            </div>
+            <div className="filter-section">
+              <div className="filter-label">Поиск</div>
+              <input
+                className="filter-input"
+                placeholder="Название отдела..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="list-panel">
+          {loading ? (
+            <div className="loader">
+              <div className="spinner" />
+              Загрузка...
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="empty">
+              <div className="empty-icon">🏢</div>
+              <p>Отделов не найдено</p>
+            </div>
+          ) : (
+            filtered.map((d) => (
+              <div className="list-item" key={d.id}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "var(--gray-400)",
+                    minWidth: 36,
+                  }}
+                >
+                  #{d.id}
+                </div>
+                <div
+                  className="list-item-main"
+                  style={{ fontWeight: 600, fontSize: 16 }}
+                >
+                  {d.name}
+                </div>
+                <div className="list-item-actions">
+                  <button
+                    className="btn btn-icon"
+                    onClick={() => {
+                      setEditDept(d);
+                      setShowModal(true);
+                    }}
+                  >
+                    <IconEdit />
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => setConfirmId(d.id)}
+                  >
+                    <IconTrash />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+      {showModal && (
+        <DepartmentModal
+          dept={editDept}
+          onClose={() => setShowModal(false)}
+          onSaved={() => {
+            setShowModal(false);
+            load();
+            setToast({
+              msg: editDept ? "Отдел обновлён" : "Отдел добавлен",
+              type: "success",
+            });
+          }}
+          onError={(msg) => setToast({ msg, type: "error" })}
+        />
+      )}
+      {confirmId !== null && (
+        <Confirm
+          msg="Удалить отдел ГИБДД? Это может затронуть связанные акты."
+          onConfirm={() => handleDelete(confirmId!)}
+          onCancel={() => setConfirmId(null)}
+        />
+      )}
+      {toast && (
+        <Toast
+          msg={toast.msg}
+          type={toast.type}
+          onDone={() => setToast(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DepartmentModal({
+  dept,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  dept: Department | null;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (m: string) => void;
+}) {
+  const [name, setName] = useState(dept?.name || "");
+  const [loading, setLoading] = useState(false);
+
+  async function submit() {
+    if (!name.trim()) return onError("Введите название отдела");
+    setLoading(true);
+    try {
+      if (dept)
+        await apiFetch(`/api/departments/${dept.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ name: name.trim() }),
+        });
+      else
+        await apiFetch("/api/departments/", {
+          method: "POST",
+          body: JSON.stringify({ name: name.trim() }),
+        });
+      onSaved();
+    } catch (e: any) {
+      onError(e.message);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal"
+        style={{ maxWidth: 400 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div className="modal-title">
+            {dept ? "Редактировать отдел" : "Новый отдел ГИБДД"}
+          </div>
+          <button
+            className="btn btn-ghost"
+            style={{ padding: 4 }}
+            onClick={onClose}
+          >
+            <IconClose />
+          </button>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Название отдела *</label>
+          <input
+            className="form-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Отдел ГИБДД №..."
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            autoFocus
+          />
+        </div>
+        <div className="modal-actions">
+          <button className="btn btn-outline" onClick={onClose}>
+            Отмена
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={submit}
+            disabled={loading}
+          >
+            {loading ? "Сохранение..." : "Сохранить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Create keys ─────────────────────────────────────────────────────────────────
+
+function IssueKeyModal({
+  onClose,
+  onGenerated,
+}: {
+  onClose: () => void;
+  onGenerated: (data: { id: number; value: string }) => void;
+}) {
+  const [fio, setFio] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleGenerate() {
+    if (!fio) return;
+    setLoading(true);
+    try {
+      const res = await apiFetch<{ id: number; key_value: string }>(
+        "/api/auth/issue-key",
+        {
+          method: "POST",
+          body: JSON.stringify({ fio }),
+        },
+      );
+      onGenerated({ id: res.id, value: res.key_value });
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal"
+        style={{ maxWidth: 400 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div className="modal-title">Выдача ключа МВД</div>
+          <button className="btn btn-ghost" onClick={onClose}>
+            <IconClose />
+          </button>
+        </div>
+        <div className="form-group">
+          <label className="form-label">ФИО сотрудника</label>
+          <input
+            className="form-input"
+            value={fio}
+            onChange={(e) => setFio(e.target.value)}
+            placeholder="Иванов И.И."
+          />
+        </div>
+        <div className="modal-actions">
+          <button className="btn btn-outline" onClick={onClose}>
+            Отмена
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleGenerate}
+            disabled={loading || !fio}
+          >
+            {loading ? "Генерация..." : "Создать ключ"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KeyResultModal({
+  keyData,
+  onClose,
+}: {
+  keyData: { id: number; value: string };
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(keyData.value);
+    setCopied(true);
+    setTimeout(() => {
+      onClose(); // Закрываем через мгновение после копирования
+    }, 600);
+  }
+
+  async function handleCancel() {
+    try {
+      await apiFetch(`/api/auth/keys/${keyData.id}`, { method: "DELETE" });
+      onClose();
+    } catch (e: any) {
+      alert("Ошибка при удалении: " + e.message);
+    }
+  }
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 400, textAlign: "center" }}>
+        <div className="modal-title">Ключ успешно создан</div>
+        <p style={{ color: "var(--gray-500)", marginTop: 8 }}>
+          Передайте этот код сотруднику для регистрации:
+        </p>
+
+        {/* Ключ на отдельной строке */}
+        <div className="generated-key-box">{keyData.value}</div>
+
+        <div
+          className="modal-actions"
+          style={{ flexDirection: "column", gap: 10, marginTop: 24 }}
+        >
+          <button
+            className="btn btn-primary"
+            onClick={handleCopy}
+            style={{ width: "100%", justifyContent: "center" }}
+          >
+            {copied ? "✓ Скопировано!" : "Копировать и закрыть"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── App root ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(!!localStorage.getItem("token"));
   const [page, setPage] = useState<Page>("dashboard");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [generatedKey, setGeneratedKey] = useState<{
+    id: number;
+    value: string;
+  } | null>(null);
+  // const [searchQuery, setSearchQuery] = useState("");
 
-  const userDisplay = (() => {
-    const token = localStorage.getItem("token");
-    if (!token)
-      return { name: "Пользователь", role: "Инспектор", initials: "П" };
-    try {
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      const name = payload.sub || "Инспектор";
-      return { name, role: "Отдел", initials: name[0]?.toUpperCase() || "И" };
-    } catch {
-      return { name: "Инспектор", role: "Отдел", initials: "И" };
-    }
-  })();
+  // Регистрируем глобальный обработчик 401 — выброс при истёкшем токене
+  useEffect(() => {
+    setUnauthorizedHandler(() => setAuthed(false));
+  }, []);
+
+  // Имя и инициалы из сохранённого userInfo (fio из таблицы users)
+  const userInfo = getUserInfo();
+  const displayName = userInfo?.fio
+    ? formatFio(userInfo.fio)
+    : (userInfo?.username ?? "Инспектор");
+  const initials = userInfo?.fio
+    ? userInfo.fio
+        .trim()
+        .split(/\s+/)
+        .map((p) => p[0]?.toUpperCase() ?? "")
+        .filter(Boolean)
+        .slice(0, 2)
+        .join("")
+    : (userInfo?.username?.[0]?.toUpperCase() ?? "И");
+  const role = userInfo?.role === "admin" ? "Администратор" : "Отдел";
 
   function logout() {
     localStorage.removeItem("token");
+    localStorage.removeItem("userInfo");
     setAuthed(false);
   }
 
-  if (!authed)
-    return (
-      <>
-        <LoginPage onLogin={() => setAuthed(true)} />
-      </>
-    );
+  if (!authed) return <LoginPage onLogin={() => setAuthed(true)} />;
 
   return (
-    <>
-      <div className="layout">
-        <Sidebar page={page} setPage={setPage} onLogout={logout} />
-        <div className="main">
-          <header className="topbar">
-            <div className="search-box">
-              <IconSearch />
-              <input
-                placeholder="Поиск"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+    <div className="layout">
+      <Sidebar page={page} setPage={setPage} onLogout={logout} />
+      <div className="main">
+        <header className="topbar">
+          {/* <div className="search-box">
+            <IconSearch />
+            <input
+              placeholder="Поиск"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div> */}
+          <div style={{ flex: 1 }} />
+          {userInfo?.role === "admin" && (
+            <button
+              className="btn btn-outline"
+              onClick={() => setShowKeyModal(true)}
+              style={{ borderColor: "var(--blue)", color: "var(--blue)" }}
+            >
+              <IconPlus /> Выдать ключ
+            </button>
+          )}
+          <div className="user-badge">
+            <div className="user-info">
+              <div className="user-name">{displayName}</div>
+              <div className="user-role">{role}</div>
             </div>
-            <div style={{ flex: 1 }} />
-            <div className="user-badge">
-              <div className="user-info">
-                <div className="user-name">
-                  {userDisplay.name.length > 20
-                    ? userDisplay.name.slice(0, 20) + "..."
-                    : userDisplay.name}
-                </div>
-                <div className="user-role">{userDisplay.role}</div>
-              </div>
-              <div className="user-avatar">{userDisplay.initials}</div>
-            </div>
-          </header>
+            <div className="user-avatar">{initials}</div>
+          </div>
+        </header>
 
-          {page === "dashboard" && <DashboardPage />}
-          {page === "acts" && <ActsPage />}
-          {page === "drivers" && <DriversPage />}
-          {page === "cars" && <CarsPage />}
-        </div>
+        {/* Модалки ключей */}
+        {showKeyModal && (
+          <IssueKeyModal
+            onClose={() => setShowKeyModal(false)}
+            onGenerated={(data) => {
+              setShowKeyModal(false);
+              setGeneratedKey(data);
+            }}
+          />
+        )}
+
+        {generatedKey && (
+          <KeyResultModal
+            keyData={generatedKey}
+            onClose={() => setGeneratedKey(null)}
+          />
+        )}
+
+        {page === "dashboard" && <DashboardPage />}
+        {page === "acts" && <ActsPage />}
+        {page === "drivers" && <DriversPage />}
+        {page === "cars" && <CarsPage />}
+        {page === "departments" && <DepartmentsPage />}
       </div>
-    </>
+    </div>
   );
 }
