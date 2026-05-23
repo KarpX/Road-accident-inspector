@@ -376,7 +376,7 @@ async def read_acts(limit: int | None = None, current_user: models.UserModel = D
         result = await session.execute(query)
         return result.unique().scalars().all()
 
-@app.get("/api/acts/{act_id}", response_model=schemas.ActResponse, tags=["Acts"])
+@app.get("/api/acts/{act_id}", response_model=schemas.ActDetailResponse, tags=["Acts"])
 async def read_act(act_id: int, current_user: models.UserModel = Depends(get_current_user)):
     async with database.get_session() as session:
         result = await session.execute(
@@ -390,7 +390,7 @@ async def read_act(act_id: int, current_user: models.UserModel = Depends(get_cur
                 joinedload(models.ActModel.participants).joinedload(models.AccidentParticipantModel.car)
             )
         )
-        act = result.scalar_one_or_none()
+        act = result.unique().scalar_one_or_none()
         if act is None:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Акт не найден")
         return act
