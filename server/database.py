@@ -24,6 +24,12 @@ class Database:
             raise Exception("Database not connected")
         return self.sessionmaker()
     
+    async def session_getter(self):
+        if self.sessionmaker is None:
+            raise Exception("Database not connected")
+        async with self.sessionmaker() as session:
+            yield session
+    
     async def disconnect(self, *args, **kwargs):
         if self.engine is not None:
             await self.engine.dispose()
